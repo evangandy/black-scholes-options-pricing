@@ -19,27 +19,31 @@
 - [ ] Document model limitations
 
 ### Project Structure
-
+```
 black-scholes-options-pricing/
-├── .gitignore
 ├── README.md
 ├── requirements.txt
-├── docs/
-│   └── README_detailed.md
-├── examples/
-├── notebooks/
-│   ├── implementation_walkthrough.ipynb
-│   ├── market_validation.ipynb
-│   ├── mathematical_derivation.ipynb
-│   └── trading_applications.ipynb
+├── .gitignore
 ├── src/
 │   └── black_scholes/
 │       ├── __init__.py
-│       ├── analysis.py
+│       ├── pricing.py
 │       ├── greeks.py
 │       ├── market_data.py
-│       └── pricing.py
-└── tests/
-    ├── test_greeks.py
-    ├── test_market_data.py
-    └── test_pricing.py
+│       └── analysis.py
+├── tests/
+│   ├── test_pricing.py
+│   ├── test_greeks.py
+│   └── test_market_data.py
+├── examples/
+│   ├── quickstart.py
+│   ├── earnings_scanner.py
+│   └── portfolio_analysis.py
+├── notebooks/
+│   ├── mathematical_derivation.ipynb
+│   ├── implementation_walkthrough.ipynb
+│   ├── market_validation.ipynb
+│   └── trading_applications.ipynb
+└── docs/
+    └── README_detailed.md
+```
