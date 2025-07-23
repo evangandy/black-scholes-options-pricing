@@ -14,6 +14,6 @@
 
 ### Phase 3: Trading Applications
 - [ ] Build opportunity scanner
-- [ ] Analyze PLNT earnings setup
+- [ ] Analyze XXXX earnings setup
 - [ ] Create risk management tools
 - [ ] Document model limitations
