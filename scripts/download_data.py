@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Market data collection using yfinance for Black-Scholes
+Import stock and options data using yfinance and save to CSV
 """
 
+import os
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import json
 from datetime import datetime
 from config import SYMBOL, DATA_PERIOD, VOLATILITY_WINDOW, TARGET_EXPIRY_DAYS
 
@@ -33,7 +35,7 @@ def get_options_chain(symbol, max_expirations=5):
             calls = chain.calls.copy()
             puts = chain.puts.copy()
             
-            # Add derived fields needed for Black-Scholes
+            # Add derived fields
             exp_datetime = pd.to_datetime(exp_date)
             days_to_expiry = (exp_datetime - today).days
             
@@ -41,12 +43,10 @@ def get_options_chain(symbol, max_expirations=5):
             puts['expiration'] = exp_date
             calls['days_to_expiry'] = days_to_expiry
             puts['days_to_expiry'] = days_to_expiry
-            calls['time_to_expiry'] = days_to_expiry / 365.25  # Years
+            calls['time_to_expiry'] = days_to_expiry / 365.25
             puts['time_to_expiry'] = days_to_expiry / 365.25
             calls['mid_price'] = (calls['bid'] + calls['ask']) / 2
             puts['mid_price'] = (puts['bid'] + puts['ask']) / 2
-            calls['bid_ask_spread'] = calls['ask'] - calls['bid']
-            puts['bid_ask_spread'] = puts['ask'] - puts['bid']
             
             # Filter liquid options
             calls = calls[
@@ -79,23 +79,6 @@ def calculate_volatility(price_series, window=252):
     returns = price_series.pct_change().dropna()
     return returns.std() * np.sqrt(window)
 
-def calculate_implied_volatility_data(options_df, current_price, risk_free_rate):
-    """Prepare data for implied volatility analysis"""
-    if options_df.empty:
-        return options_df
-    
-    # Add moneyness
-    options_df['moneyness'] = options_df['strike'] / current_price
-    
-    # Categorize options
-    options_df['option_type'] = np.where(
-        (options_df['moneyness'] >= 0.95) & (options_df['moneyness'] <= 1.05),
-        'ATM',
-        np.where(options_df['moneyness'] < 0.95, 'ITM', 'OTM')
-    )
-    
-    return options_df
-
 def get_risk_free_rate():
     """Get 3-month Treasury rate"""
     try:
@@ -105,17 +88,7 @@ def get_risk_free_rate():
             return hist['Close'][-1] / 100
     except:
         pass
-    
-    # Fallback to 10-year Treasury
-    try:
-        treasury = yf.Ticker("^TNX")
-        hist = treasury.history(period="5d")
-        if not hist.empty:
-            return hist['Close'][-1] / 100
-    except:
-        pass
-    
-    return 0.0525  # Default fallback
+    return 0.0525
 
 def get_current_price(symbol):
     """Get current stock price"""
@@ -129,53 +102,78 @@ def get_current_price(symbol):
     except:
         pass
     
-    # Fallback to recent close
     try:
         df = get_stock_data(symbol, period="5d")
         return df['Close'].iloc[-1]
     except:
         return None
 
-def get_dividend_yield(symbol):
-    """Get dividend yield for dividend-adjusted Black-Scholes"""
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        dividend_yield = info.get('dividendYield', 0)
-        return dividend_yield if dividend_yield else 0
-    except:
-        return 0
+def filter_target_expiry(options_df, target_days=TARGET_EXPIRY_DAYS, tolerance=15):
+    """Filter options near target expiry"""
+    if options_df.empty:
+        return options_df
+    
+    return options_df[
+        (options_df['days_to_expiry'] >= target_days - tolerance) &
+        (options_df['days_to_expiry'] <= target_days + tolerance)
+    ]
 
-def prepare_black_scholes_inputs(symbol):
-    """Get all inputs needed for Black-Scholes model"""
-    # Stock data
-    stock_data = get_stock_data(symbol, DATA_PERIOD)
-    current_price = get_current_price(symbol)
+def main():
+    print(f"Downloading data for {SYMBOL}...")
+    
+    # Get stock data
+    stock_data = get_stock_data(SYMBOL, DATA_PERIOD)
+    current_price = get_current_price(SYMBOL)
     volatility = calculate_volatility(stock_data['Close'], VOLATILITY_WINDOW)
+    risk_free_rate = get_risk_free_rate()
+    
+    # Get options data
+    options = get_options_chain(SYMBOL)
+    
+    # Filter options for target expiry
+    calls_filtered = filter_target_expiry(options['calls'])
+    puts_filtered = filter_target_expiry(options['puts'])
+    
+    # Save data
+    os.makedirs('data', exist_ok=True)
+    
+    # Stock data
+    stock_file = f"data/{SYMBOL}_stock.csv"
+    stock_data.to_csv(stock_file)
+    print(f"Stock data saved: {stock_file}")
     
     # Options data
-    options = get_options_chain(symbol)
+    if not calls_filtered.empty:
+        calls_file = f"data/{SYMBOL}_calls.csv"
+        calls_filtered.to_csv(calls_file, index=False)
+        print(f"Calls saved: {calls_file} ({len(calls_filtered)} options)")
     
-    # Market data
-    risk_free_rate = get_risk_free_rate()
-    dividend_yield = get_dividend_yield(symbol)
+    if not puts_filtered.empty:
+        puts_file = f"data/{SYMBOL}_puts.csv"
+        puts_filtered.to_csv(puts_file, index=False)
+        print(f"Puts saved: {puts_file} ({len(puts_filtered)} options)")
     
-    # Process options data
-    if not options['calls'].empty:
-        options['calls'] = calculate_implied_volatility_data(
-            options['calls'], current_price, risk_free_rate
-        )
-    if not options['puts'].empty:
-        options['puts'] = calculate_implied_volatility_data(
-            options['puts'], current_price, risk_free_rate
-        )
-    
-    return {
-        'stock_data': stock_data,
+    # Summary
+    summary = {
+        'symbol': SYMBOL,
         'current_price': current_price,
         'historical_volatility': volatility,
         'risk_free_rate': risk_free_rate,
-        'dividend_yield': dividend_yield,
-        'options': options,
-        'symbol': symbol
+        'stock_data_points': len(stock_data),
+        'calls_count': len(calls_filtered),
+        'puts_count': len(puts_filtered),
+        'download_timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
+    
+    summary_file = f"data/{SYMBOL}_summary.json"
+    with open(summary_file, 'w') as f:
+        json.dump(summary, f, indent=2, default=str)
+    
+    print(f"\nSummary:")
+    print(f"Current Price: ${current_price:.2f}")
+    print(f"Volatility: {volatility:.1%}")
+    print(f"Risk-Free Rate: {risk_free_rate:.3%}")
+    print(f"Target Options: {len(calls_filtered)} calls, {len(puts_filtered)} puts")
+
+if __name__ == "__main__":
+    main()
